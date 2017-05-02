@@ -2,12 +2,13 @@
 // Created by tim on 4/23/17.
 //
 #include <stdlib.h>
+#include <string.h>
 #include "strongswan_profile.h"
 
 G_DEFINE_TYPE_WITH_CODE(StrongSwanProfile, strongswan_profile, G_TYPE_OBJECT,
                         G_IMPLEMENT_INTERFACE(JSON_TYPE_SERIALIZABLE, serializable_iface_init));
 
-static GParamSpec *properties[N_PROPERTIES] = { NULL };
+static GParamSpec *properties[N_PROPERTIES] = {NULL};
 
 static void setting_vpn_add_data_item(NMSettingVpn *setting, const char *key, const char *value) {
     g_return_if_fail(NM_IS_SETTING_VPN(setting));
@@ -20,19 +21,17 @@ static void setting_vpn_add_data_item(NMSettingVpn *setting, const char *key, co
 static void strongswan_profile_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec) {
     StrongSwanProfile *self = STRONGSWAN_PROFILE_SOURCE (object);
 
-    switch (prop_id)
-    {
+    switch (prop_id) {
         case PROP_UUID:
             g_free(self->uuid);
             self->uuid = g_value_dup_string(value);
             break;
         case PROP_NAME:
-            g_free (self->name);
+            g_free(self->name);
             self->name = g_value_dup_string(value);
             break;
-        case PROP_TYPE:
-            g_free(self->type);
-            self->type = g_value_dup_string(value);
+        case PROP_METHOD:
+            self->method = (VPNMethod) g_value_get_enum(value);
             break;
         case PROP_REMOTEADDR:
             g_free(self->remote_addr);
@@ -42,26 +41,42 @@ static void strongswan_profile_set_property(GObject *object, guint prop_id, cons
             g_free(self->p12);
             self->p12 = g_value_dup_string(value);
             break;
-        case PROP_MTU:
-            self->mtu = g_value_get_double(value);
+        case PROP_IKE:
+            g_free(self->ike);
+            self->ike = g_value_dup_string(value);
+            break;
+        case PROP_ESP:
+            g_free(self->esp);
+            self->esp = g_value_dup_string(value);
+            break;
+        case PROP_CERT:
+            g_free(self->certificate);
+            self->certificate = g_value_dup_string(value);
+            break;
+        case PROP_USERCERT:
+            g_free(self->user_cert);
+            self->user_cert = g_value_dup_string(value);
+            break;
+        case PROP_USERKEY:
+            g_free(self->user_key);
+            self->user_key = g_value_dup_string(value);
             break;
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
     }
 }
 
-static void strongswan_profile_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec) {
+static void strongswan_profile_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec) {
     StrongSwanProfile *self = STRONGSWAN_PROFILE_SOURCE(object);
-    switch (prop_id)
-    {
+    switch (prop_id) {
         case PROP_UUID:
             g_value_set_string(value, self->uuid);
             break;
         case PROP_NAME:
             g_value_set_string(value, self->name);
             break;
-        case PROP_TYPE:
-            g_value_set_string(value, self->type);
+        case PROP_METHOD:
+            g_value_set_enum(value, self->method);
             break;
         case PROP_REMOTEADDR:
             g_value_set_string(value, self->remote_addr);
@@ -69,17 +84,28 @@ static void strongswan_profile_get_property (GObject *object, guint prop_id, GVa
         case PROP_LOCALP12:
             g_value_set_string(value, self->p12);
             break;
-        case PROP_MTU:
-            g_value_set_double(value, self->mtu);
+        case PROP_IKE:
+            g_value_set_string(value, self->ike);
+            break;
+        case PROP_ESP:
+            g_value_set_string(value, self->esp);
+            break;
+        case PROP_CERT:
+            g_value_set_string(value, self->certificate);
+            break;
+        case PROP_USERCERT:
+            g_value_set_string(value, self->user_cert);
+            break;
+        case PROP_USERKEY:
+            g_value_set_string(value, self->user_key);
             break;
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
     }
 }
 
-//ikev2-eap, ikev2-cert, ikev2-cert-eap, ikev2-eap-tls, ikev2-byod-eap
-static void strongswan_profile_class_init (StrongSwanProfileClass *klass) {
-    GObjectClass *objectClass= G_OBJECT_CLASS(klass);
+static void strongswan_profile_class_init(StrongSwanProfileClass *klass) {
+    GObjectClass *objectClass = G_OBJECT_CLASS(klass);
     objectClass->get_property = strongswan_profile_get_property;
     objectClass->set_property = strongswan_profile_set_property;
     properties[PROP_UUID] = g_param_spec_string("uuid",
@@ -92,11 +118,11 @@ static void strongswan_profile_class_init (StrongSwanProfileClass *klass) {
                                                 "The name of the VPN Profile.",
                                                 NULL,
                                                 G_PARAM_READWRITE);
-    //TODO: convert to enum
-    properties[PROP_TYPE] = g_param_spec_string("type",
-                                                "VPN connection type",
-                                                "The type of VPN connection; one of (ikev2-eap, ikev2-cert, ikev2-cert-eap, ikev2-eap-tls, ikev2-byod-eap)",
-                                                NULL,
+    properties[PROP_METHOD] = g_param_spec_enum("method",
+                                                "VPN connection method",
+                                                "The method of VPN connection; one of (key, agent, smartcard, eap)",
+                                                STRONGSWAN_VPN_METHOD_TYPE,
+                                                METHOD_NONE,
                                                 G_PARAM_READWRITE);
     properties[PROP_REMOTEADDR] = g_param_spec_string("remote.addr",
                                                       "Remote address",
@@ -108,18 +134,36 @@ static void strongswan_profile_class_init (StrongSwanProfileClass *klass) {
                                                     "The PKCS12 container.",
                                                     NULL,
                                                     G_PARAM_READWRITE);
-    properties[PROP_MTU] = g_param_spec_double("mtu",
-                                               "MTU",
-                                               "MTU to use for the VPN Profile.",
-                                               1268,     // min (min allowed by ipv6)
-                                               1500,  // max
-                                               1386,  // default
+    properties[PROP_IKE] = g_param_spec_string("ike",
+                                               "IKE Proposal",
+                                               "Restrict the IKE proposal to this.",
+                                               NULL,
                                                G_PARAM_READWRITE);
+    properties[PROP_ESP] = g_param_spec_string("esp",
+                                               "ESP Proposal",
+                                               "Restrict the ESP proposal to this.",
+                                               NULL,
+                                               G_PARAM_READWRITE);
+    properties[PROP_CERT] = g_param_spec_string("cert",
+                                                "Certificate",
+                                                "Server certificate",
+                                                NULL,
+                                                G_PARAM_READWRITE);
+    properties[PROP_USERCERT] = g_param_spec_string("usercert",
+                                                    "User certificate",
+                                                    "User certificate",
+                                                    NULL,
+                                                    G_PARAM_READWRITE);
+    properties[PROP_USERKEY] = g_param_spec_string("userkey",
+                                                   "User key",
+                                                   "User key",
+                                                   NULL,
+                                                   G_PARAM_READWRITE);
 
-    g_object_class_install_properties (objectClass, N_PROPERTIES, properties);
+    g_object_class_install_properties(objectClass, N_PROPERTIES, properties);
 }
 
-NMConnection* strongswan_import_sswan(const char *path) {
+NMConnection *strongswan_import_sswan(const char *path) {
     NMConnection *connection;
     NMSettingConnection *s_con;
     NMSettingIPConfig *s_ip4;
@@ -132,26 +176,29 @@ NMConnection* strongswan_import_sswan(const char *path) {
     //TODO: check for memory leaks throughout all of this
     connection = nm_simple_connection_new();
 
-    if(error) {
+    if (error) {
         g_print("%s", error->message);
         g_error_free(error);
         g_object_unref(parser);
         return NULL;
     }
-    StrongSwanProfile *foo = (StrongSwanProfile*)json_gobject_deserialize(STRONGSWAN_PROFILE_TYPE_SOURCE, root);
-    g_print("%s , %s\n", foo->name, foo->uuid);
-//    guint count = N_PROPERTIES;
-//    GParamSpec **props = g_object_class_list_properties(G_OBJECT_GET_CLASS(foo), &count);
+    StrongSwanProfile *profile = (StrongSwanProfile *) json_gobject_deserialize(STRONGSWAN_PROFILE_TYPE_SOURCE, root);
 
     connection = nm_simple_connection_new();
     s_con = NM_SETTING_CONNECTION(nm_setting_connection_new());
 
-//    if(foo->uuid == NULL)
-//        foo->uuid = nm_utils_uuid_generate();
+    if (!profile->uuid)
+        profile->uuid = nm_utils_uuid_generate();
+
+    if (!profile->name) {
+        g_set_error(&error, 2, 0, "Missing required field `name`");
+        g_print("%s", error->message);
+        return NULL;
+    }
 
     g_object_set(G_OBJECT(s_con),
-                 NM_SETTING_CONNECTION_UUID, foo->uuid,
-                 NM_SETTING_CONNECTION_ID, foo->name,
+                 NM_SETTING_CONNECTION_UUID, profile->uuid,
+                 NM_SETTING_CONNECTION_ID, profile->name,
                  NM_SETTING_CONNECTION_TYPE, NM_SETTING_VPN_SETTING_NAME,
                  NULL
     );
@@ -166,27 +213,48 @@ NMConnection* strongswan_import_sswan(const char *path) {
     //TODO: use network-manager-strongswan definition for name
     g_object_set(s_vpn, NM_SETTING_VPN_SERVICE_TYPE, "org.freedesktop.NetworkManager.strongswan", NULL);
 
-//    setting_vpn_add_data_item(s_vpn, NM_SETTING_VPN_SERVICE_TYPE, foo->type);
-    /*
-     * vpn.data: ipcomp = no,
-     * certificate = /home/tim/algo/configs/54.158.207.91/cacert.pem,
-     * method = key,
-     * virtual = yes,
-     * address = 54.158.207.91,
-     * encap = no,
-     * usercert = /home/tim/algo/configs/54.158.207.91/pki/certs/dan.crt,
-     * userkey = /home/tim/algo/configs/54.158.207.91/pki/private/dan.key
-     */
+    if (profile->ike || profile->esp)
+        setting_vpn_add_data_item(s_vpn, "proposal", "yes");
+    if (profile->ike)
+        setting_vpn_add_data_item(s_vpn, "ike", profile->ike);
+    if (profile->esp)
+        setting_vpn_add_data_item(s_vpn, "esp", profile->esp);
 
-    setting_vpn_add_data_item(s_vpn, "address", foo->remote_addr);
-    setting_vpn_add_data_item(s_vpn, "method", "key");
+    if (!profile->remote_addr) {
+        g_set_error(&error, 2, 0, "Missing required field `remote.addr`");
+        g_print("%s", error->message);
+        return NULL;
+    }
+    setting_vpn_add_data_item(s_vpn, "address", profile->remote_addr);
+
+    switch (profile->method) {
+        case METHOD_KEY:
+            setting_vpn_add_data_item(s_vpn, "method", "key");
+            if (profile->certificate)
+                setting_vpn_add_data_item(s_vpn, "certificate", profile->certificate);
+            if (profile->user_cert)
+                setting_vpn_add_data_item(s_vpn, "usercert", profile->user_cert);
+            if (profile->user_key)
+                setting_vpn_add_data_item(s_vpn, "userkey", profile->user_key);
+            break;
+        case METHOD_AGENT:
+        case METHOD_SMARTCARD:
+        case METHOD_EAP:
+            g_set_error(&error, 2, 0, "Method currently not implemented.");
+            g_print("%s", error->message);
+            return NULL;
+        case METHOD_NONE:
+        default:
+            //TODO: error handling
+            g_set_error(&error, 2, 0, "No VPN `method` was defined. `method` = (key, agent, smartcard, eap)");
+            g_print("%s", error->message);
+            return NULL;
+    }
+
     setting_vpn_add_data_item(s_vpn, "ipcomp", "no");
+    setting_vpn_add_data_item(s_vpn, "encap", "no");
     setting_vpn_add_data_item(s_vpn, "virtual", "yes");
 
-//    g_object_set(G_OBJECT(s_vpn),
-//                 NM_SETTING_VPN_SERVICE_TYPE, foo->type,
-//                 NULL
-//    );
     nm_connection_add_setting(connection, NM_SETTING(s_vpn));
 
     g_object_unref(parser);
@@ -194,4 +262,17 @@ NMConnection* strongswan_import_sswan(const char *path) {
 }
 
 static void strongswan_profile_init(StrongSwanProfile *self) {}
-static void serializable_iface_init(JsonSerializableIface *iface) { }
+
+static void serializable_iface_init(JsonSerializableIface *iface) {}
+
+GType strongswan_vpn_method_get_type() {
+    static const GEnumValue values[] = {
+            {METHOD_NONE,      "METHOD_NONE",      "none"},
+            {METHOD_KEY,       "METHOD_KEY",       "key"},
+            {METHOD_AGENT,     "METHOD_AGENT",     "agent"},
+            {METHOD_SMARTCARD, "METHOD_SMARTCARD", "smartcard"},
+            {METHOD_EAP,       "METHOD_EAP",       "eap"},
+            {0, NULL, NULL}
+    };
+    return g_enum_register_static(g_intern_static_string("VPNMethod"), values);
+}

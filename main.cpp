@@ -6,18 +6,11 @@
 //extern "C" NMConnection* strongswan_import_sswan(const char *path);
 
 
-static void
-added_cb (GObject *client,
-          GAsyncResult *result,
-          gpointer user_data)
-{
+static void added_cb (GObject *client, GAsyncResult *result, gpointer user_data) {
     GMainLoop *loop = (GMainLoop*)user_data;
     NMRemoteConnection *remote;
     GError *error = NULL;
 
-    /* NM responded to our request; either handle the resulting error or
-     * print out the object path of the connection we just added.
-     */
     remote = nm_client_add_connection_finish (NM_CLIENT (client), result, &error);
 
     if (error) {
@@ -27,8 +20,6 @@ added_cb (GObject *client,
         g_print ("Added: %s\n", nm_connection_get_path (NM_CONNECTION (remote)));
         g_object_unref (remote);
     }
-
-    /* Tell the mainloop we're done and we can quit now */
     g_main_loop_quit (loop);
 }
 
@@ -37,8 +28,9 @@ int main() {
 
     NMClient *client;
     GMainLoop *loop;
-    GError *error;
+    GError *error = NULL;
     NMConnection *connection = strongswan_import_sswan("test.json");
+
     g_return_val_if_fail(connection != NULL, -1);
 
 #if !GLIB_CHECK_VERSION (2, 35, 0)
@@ -48,7 +40,6 @@ int main() {
 
     loop = g_main_loop_new (NULL, FALSE);
 
-    /* Connect to NetworkManager */
     client = nm_client_new (NULL, &error);
     if (!client) {
         g_message ("Error: Could not connect to NetworkManager: %s.", error->message);
@@ -60,6 +51,6 @@ int main() {
 
     g_main_loop_run(loop);
     g_object_unref(client);
-//
+
     return 0;
 }
