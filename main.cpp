@@ -29,7 +29,7 @@ int main() {
     NMClient *client;
     GMainLoop *loop;
     GError *error = NULL;
-    NMConnection *connection = strongswan_import_sswan("test.json");
+    NMConnection *connection = strongswan_import_sswan("test.json", &error);
 
     g_return_val_if_fail(connection != NULL, -1);
 

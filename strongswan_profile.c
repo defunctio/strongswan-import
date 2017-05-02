@@ -1,6 +1,27 @@
-//
-// Created by tim on 4/23/17.
-//
+/*
+ *   MIT License
+ *
+ *   Copyright (c) 2017 defunct (https://keybase.io/defunct)
+ *
+ *   Permission is hereby granted, free of charge, to any person obtaining a copy
+ *   of this software and associated documentation files (the "Software"), to deal
+ *   in the Software without restriction, including without limitation the rights
+ *   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ *   copies of the Software, and to permit persons to whom the Software is
+ *   furnished to do so, subject to the following conditions:
+ *
+ *   The above copyright notice and this permission notice shall be included in all
+ *   copies or substantial portions of the Software.
+ *
+ *   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ *   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ *   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ *   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ *   SOFTWARE.
+ */
+
 #include <stdlib.h>
 #include <string.h>
 #include "strongswan_profile.h"
@@ -163,22 +184,19 @@ static void strongswan_profile_class_init(StrongSwanProfileClass *klass) {
     g_object_class_install_properties(objectClass, N_PROPERTIES, properties);
 }
 
-NMConnection *strongswan_import_sswan(const char *path) {
+NMConnection *strongswan_import_sswan(const char *path, GError **error) {
     NMConnection *connection;
     NMSettingConnection *s_con;
     NMSettingIPConfig *s_ip4;
     NMSettingVpn *s_vpn;
-    GError *error = NULL;
     JsonParser *parser = json_parser_new();
-    json_parser_load_from_file(parser, path, &error);
+    json_parser_load_from_file(parser, path, error);
     JsonNode *root = json_parser_get_root(parser);
 
     //TODO: check for memory leaks throughout all of this
     connection = nm_simple_connection_new();
 
-    if (error) {
-        g_print("%s", error->message);
-        g_error_free(error);
+    if (*error) {
         g_object_unref(parser);
         return NULL;
     }
@@ -191,8 +209,8 @@ NMConnection *strongswan_import_sswan(const char *path) {
         profile->uuid = nm_utils_uuid_generate();
 
     if (!profile->name) {
-        g_set_error(&error, 2, 0, "Missing required field `name`");
-        g_print("%s", error->message);
+        //TODO: use STRONGSWAN error defines
+        g_set_error(error, 2, 0, "Missing required field `name`");
         return NULL;
     }
 
@@ -221,8 +239,8 @@ NMConnection *strongswan_import_sswan(const char *path) {
         setting_vpn_add_data_item(s_vpn, "esp", profile->esp);
 
     if (!profile->remote_addr) {
-        g_set_error(&error, 2, 0, "Missing required field `remote.addr`");
-        g_print("%s", error->message);
+        //TODO: use STRONGSWAN error defines
+        g_set_error(error, 2, 0, "Missing required field `remote.addr`");
         return NULL;
     }
     setting_vpn_add_data_item(s_vpn, "address", profile->remote_addr);
@@ -240,14 +258,13 @@ NMConnection *strongswan_import_sswan(const char *path) {
         case METHOD_AGENT:
         case METHOD_SMARTCARD:
         case METHOD_EAP:
-            g_set_error(&error, 2, 0, "Method currently not implemented.");
-            g_print("%s", error->message);
+            //TODO: use STRONGSWAN error defines
+            g_set_error(error, 2, 0, "Method currently not implemented.");
             return NULL;
         case METHOD_NONE:
         default:
-            //TODO: error handling
-            g_set_error(&error, 2, 0, "No VPN `method` was defined. `method` = (key, agent, smartcard, eap)");
-            g_print("%s", error->message);
+            //TODO: use STRONGSWAN error defines
+            g_set_error(error, 2, 0, "No VPN `method` was defined. `method` = (key, agent, smartcard, eap)");
             return NULL;
     }
 
