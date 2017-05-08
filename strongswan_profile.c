@@ -125,10 +125,31 @@ static void strongswan_profile_get_property(GObject *object, guint prop_id, GVal
     }
 }
 
+
+static void strongswan_profile_dispose(GObject *gObject) {
+    StrongSwanProfile *priv = strongswan_profile_get_instance_private(STRONGSWAN_PROFILE_SOURCE(gObject));
+    G_OBJECT_CLASS(strongswan_profile_parent_class)->dispose(gObject);
+}
+
+static void strongswan_profile_finalize(GObject *gObject) {
+    StrongSwanProfile *priv = strongswan_profile_get_instance_private(STRONGSWAN_PROFILE_SOURCE(gObject));
+    if(priv->user_key) g_free(priv->user_key);
+    if(priv->user_cert) g_free(priv->user_cert);
+    if(priv->certificate) g_free(priv->certificate);
+    if(priv->remote_addr) g_free(priv->remote_addr);
+    if(priv->name) g_free(priv->name);
+    if(priv->esp) g_free(priv->esp);
+    if(priv->ike) g_free(priv->ike);
+    if(priv->p12) g_free(priv->p12);
+    if(priv->uuid) g_free(priv->uuid);
+}
+
 static void strongswan_profile_class_init(StrongSwanProfileClass *klass) {
     GObjectClass *objectClass = G_OBJECT_CLASS(klass);
     objectClass->get_property = strongswan_profile_get_property;
     objectClass->set_property = strongswan_profile_set_property;
+    objectClass->finalize = strongswan_profile_finalize;
+    objectClass->dispose = strongswan_profile_dispose;
     properties[PROP_UUID] = g_param_spec_string("uuid",
                                                 "Connection UUID",
                                                 "The UUID4 to be used in NetworkManager",
@@ -202,7 +223,6 @@ NMConnection *strongswan_import_sswan(const char *path, GError **error) {
     }
     StrongSwanProfile *profile = (StrongSwanProfile *) json_gobject_deserialize(STRONGSWAN_PROFILE_TYPE_SOURCE, root);
 
-    connection = nm_simple_connection_new();
     s_con = NM_SETTING_CONNECTION(nm_setting_connection_new());
 
     if (!profile->uuid)
@@ -211,6 +231,8 @@ NMConnection *strongswan_import_sswan(const char *path, GError **error) {
     if (!profile->name) {
         //TODO: use STRONGSWAN error defines
         g_set_error(error, 2, 0, "Missing required field `name`");
+        g_object_unref(parser);
+        g_object_unref(profile);
         return NULL;
     }
 
@@ -241,6 +263,8 @@ NMConnection *strongswan_import_sswan(const char *path, GError **error) {
     if (!profile->remote_addr) {
         //TODO: use STRONGSWAN error defines
         g_set_error(error, 2, 0, "Missing required field `remote.addr`");
+        g_object_unref(profile);
+        g_object_unref(parser);
         return NULL;
     }
     setting_vpn_add_data_item(s_vpn, "address", profile->remote_addr);
@@ -260,11 +284,15 @@ NMConnection *strongswan_import_sswan(const char *path, GError **error) {
         case METHOD_EAP:
             //TODO: use STRONGSWAN error defines
             g_set_error(error, 2, 0, "Method currently not implemented.");
+            g_object_unref(profile);
+            g_object_unref(parser);
             return NULL;
         case METHOD_NONE:
         default:
             //TODO: use STRONGSWAN error defines
             g_set_error(error, 2, 0, "No VPN `method` was defined. `method` = (key, agent, smartcard, eap)");
+            g_object_unref(profile);
+            g_object_unref(parser);
             return NULL;
     }
 
@@ -274,6 +302,7 @@ NMConnection *strongswan_import_sswan(const char *path, GError **error) {
 
     nm_connection_add_setting(connection, NM_SETTING(s_vpn));
 
+    g_object_unref(profile);
     g_object_unref(parser);
     return connection;
 }

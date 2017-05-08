@@ -3,6 +3,8 @@ project(strongswan-import)
 
 set(CMAKE_CXX_STANDARD 14)
 find_package(PkgConfig REQUIRED)
+set(CMAKE_C_FLAGS "-fsanitize=address -g")
+set(CMAKE_CXX_FLAGS "-fsanitize=address -g")
 
 pkg_search_module(GLIB glib-2.0)
 pkg_search_module(JSON json-glib-1.0)
