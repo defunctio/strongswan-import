@@ -84,7 +84,7 @@ GType strongswan_vpn_method_get_type(void);
 static void serializable_iface_init(JsonSerializableIface *iface);
 static void setting_vpn_add_data_item(NMSettingVpn *setting, const char *key, const char *value);
 NMConnection *strongswan_import_sswan(const char *path, GError **error);
-
+NMConnection *strongswan_fuzz_import(const char *data, size_t size, GError **error);
 
 G_END_DECLS
 

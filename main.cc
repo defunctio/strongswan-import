@@ -24,13 +24,19 @@ static void added_cb (GObject *client, GAsyncResult *result, gpointer user_data)
 }
 
 
-int main() {
+int main(int argc, char **argv) {
 
     NMClient *client;
     GMainLoop *loop;
     GError *error = NULL;
-    NMConnection *connection = strongswan_import_sswan("test.json", &error);
-
+    if (argc <= 1)
+        return -1;
+    NMConnection *connection = strongswan_import_sswan(argv[1], &error);
+    if(error) {
+        g_message("%s", error->message);
+        g_error_free(error);
+        return -1;
+    }
     g_return_val_if_fail(connection != NULL, -1);
 
 #if !GLIB_CHECK_VERSION (2, 35, 0)

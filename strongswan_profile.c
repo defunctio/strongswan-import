@@ -205,23 +205,21 @@ static void strongswan_profile_class_init(StrongSwanProfileClass *klass) {
     g_object_class_install_properties(objectClass, N_PROPERTIES, properties);
 }
 
-NMConnection *strongswan_import_sswan(const char *path, GError **error) {
+
+NMConnection *parse_sswan(JsonParser *parser, GError **error) {
     NMConnection *connection;
     NMSettingConnection *s_con;
     NMSettingIPConfig *s_ip4;
     NMSettingVpn *s_vpn;
-    JsonParser *parser = json_parser_new();
-    json_parser_load_from_file(parser, path, error);
     JsonNode *root = json_parser_get_root(parser);
+
+    if(root==NULL) { return NULL; }
 
     //TODO: check for memory leaks throughout all of this
     connection = nm_simple_connection_new();
 
-    if (*error) {
-        g_object_unref(parser);
-        return NULL;
-    }
     StrongSwanProfile *profile = (StrongSwanProfile *) json_gobject_deserialize(STRONGSWAN_PROFILE_TYPE_SOURCE, root);
+    if(profile == NULL) { return NULL; }
 
     s_con = NM_SETTING_CONNECTION(nm_setting_connection_new());
 
@@ -230,7 +228,9 @@ NMConnection *strongswan_import_sswan(const char *path, GError **error) {
 
     if (!profile->name) {
         //TODO: use STRONGSWAN error defines
+#if !__has_feature(address_sanitizer)
         g_set_error(error, 2, 0, "Missing required field `name`");
+#endif
         g_object_unref(parser);
         g_object_unref(profile);
         return NULL;
@@ -262,7 +262,9 @@ NMConnection *strongswan_import_sswan(const char *path, GError **error) {
 
     if (!profile->remote_addr) {
         //TODO: use STRONGSWAN error defines
+#if !__has_feature(address_sanitizer)
         g_set_error(error, 2, 0, "Missing required field `remote.addr`");
+#endif
         g_object_unref(profile);
         g_object_unref(parser);
         return NULL;
@@ -283,19 +285,26 @@ NMConnection *strongswan_import_sswan(const char *path, GError **error) {
         case METHOD_SMARTCARD:
         case METHOD_EAP:
             //TODO: use STRONGSWAN error defines
+#if !__has_feature(address_sanitizer)
             g_set_error(error, 2, 0, "Method currently not implemented.");
+#endif
             g_object_unref(profile);
             g_object_unref(parser);
+            g_object_unref(s_con);
+            g_object_unref(s_vpn);
             return NULL;
         case METHOD_NONE:
         default:
             //TODO: use STRONGSWAN error defines
+#if !__has_feature(address_sanitizer)
             g_set_error(error, 2, 0, "No VPN `method` was defined. `method` = (key, agent, smartcard, eap)");
+#endif
             g_object_unref(profile);
             g_object_unref(parser);
             return NULL;
     }
 
+    //TODO: make these values configurable
     setting_vpn_add_data_item(s_vpn, "ipcomp", "no");
     setting_vpn_add_data_item(s_vpn, "encap", "no");
     setting_vpn_add_data_item(s_vpn, "virtual", "yes");
@@ -303,6 +312,30 @@ NMConnection *strongswan_import_sswan(const char *path, GError **error) {
     nm_connection_add_setting(connection, NM_SETTING(s_vpn));
 
     g_object_unref(profile);
+    g_object_unref(parser);
+    return connection;
+}
+
+NMConnection *strongswan_fuzz_import(const char *data, size_t size, GError **error) {
+    JsonParser *parser = json_parser_new();
+    json_parser_load_from_data(parser, data, size, error);
+    if (*error) {
+        g_object_unref(parser);
+        return NULL;
+    }
+    NMConnection *connection =  parse_sswan(parser, error);
+    g_object_unref(parser);
+    return connection;
+}
+
+NMConnection *strongswan_import_sswan(const char *path, GError **error) {
+    JsonParser *parser = json_parser_new();
+    json_parser_load_from_file(parser, path, error);
+    if (*error) {
+        g_object_unref(parser);
+        return NULL;
+    }
+    NMConnection *connection =  parse_sswan(parser, error);
     g_object_unref(parser);
     return connection;
 }
