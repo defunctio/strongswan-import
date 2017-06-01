@@ -26,6 +26,8 @@
 #include <string.h>
 #include "strongswan_profile.h"
 
+static void serializable_iface_init(JsonSerializableIface *iface) {}
+
 G_DEFINE_TYPE_WITH_CODE(StrongSwanProfile, strongswan_profile, G_TYPE_OBJECT,
                         G_IMPLEMENT_INTERFACE(JSON_TYPE_SERIALIZABLE, serializable_iface_init));
 
@@ -47,7 +49,7 @@ static void strongswan_profile_set_property(GObject *object, guint prop_id, cons
             g_free(self->uuid);
             self->uuid = g_value_dup_string(value);
             break;
-        case PROP_NAME:
+        case PROP_VPNNAME:
             g_free(self->name);
             self->name = g_value_dup_string(value);
             break;
@@ -93,7 +95,7 @@ static void strongswan_profile_get_property(GObject *object, guint prop_id, GVal
         case PROP_UUID:
             g_value_set_string(value, self->uuid);
             break;
-        case PROP_NAME:
+        case PROP_VPNNAME:
             g_value_set_string(value, self->name);
             break;
         case PROP_METHOD:
@@ -127,7 +129,7 @@ static void strongswan_profile_get_property(GObject *object, guint prop_id, GVal
 
 
 static void strongswan_profile_dispose(GObject *gObject) {
-    StrongSwanProfile *priv = strongswan_profile_get_instance_private(STRONGSWAN_PROFILE_SOURCE(gObject));
+//    StrongSwanProfile *priv = strongswan_profile_get_instance_private(STRONGSWAN_PROFILE_SOURCE(gObject));
     G_OBJECT_CLASS(strongswan_profile_parent_class)->dispose(gObject);
 }
 
@@ -155,7 +157,7 @@ static void strongswan_profile_class_init(StrongSwanProfileClass *klass) {
                                                 "The UUID4 to be used in NetworkManager",
                                                 NULL,
                                                 G_PARAM_READWRITE);
-    properties[PROP_NAME] = g_param_spec_string("name",
+    properties[PROP_VPNNAME] = g_param_spec_string("name",
                                                 "Profile name",
                                                 "The name of the VPN Profile.",
                                                 NULL,
@@ -211,6 +213,7 @@ NMConnection *parse_sswan(JsonParser *parser, GError **error) {
     NMSettingConnection *s_con;
     NMSettingIPConfig *s_ip4;
     NMSettingVpn *s_vpn;
+    StrongSwanProfile *profile;
     JsonNode *root = json_parser_get_root(parser);
 
     if(root==NULL) { return NULL; }
@@ -218,7 +221,7 @@ NMConnection *parse_sswan(JsonParser *parser, GError **error) {
     //TODO: check for memory leaks throughout all of this
     connection = nm_simple_connection_new();
 
-    StrongSwanProfile *profile = (StrongSwanProfile *) json_gobject_deserialize(STRONGSWAN_PROFILE_TYPE_SOURCE, root);
+    profile  = (StrongSwanProfile *) json_gobject_deserialize(STRONGSWAN_PROFILE_TYPE_SOURCE, root);
     if(profile == NULL) { return NULL; }
 
     s_con = NM_SETTING_CONNECTION(nm_setting_connection_new());
@@ -274,6 +277,8 @@ NMConnection *parse_sswan(JsonParser *parser, GError **error) {
     switch (profile->method) {
         case METHOD_KEY:
             setting_vpn_add_data_item(s_vpn, "method", "key");
+            if (profile->p12)
+                nm_setting_vpn_add_secret(s_vpn, "p12", profile->p12);
             if (profile->certificate)
                 setting_vpn_add_data_item(s_vpn, "certificate", profile->certificate);
             if (profile->user_cert)
@@ -317,32 +322,32 @@ NMConnection *parse_sswan(JsonParser *parser, GError **error) {
 }
 
 NMConnection *strongswan_fuzz_import(const char *data, size_t size, GError **error) {
+    NMConnection *connection;
     JsonParser *parser = json_parser_new();
     json_parser_load_from_data(parser, data, size, error);
     if (*error) {
         g_object_unref(parser);
         return NULL;
     }
-    NMConnection *connection =  parse_sswan(parser, error);
+    connection =  parse_sswan(parser, error);
     g_object_unref(parser);
     return connection;
 }
 
-NMConnection *strongswan_import_sswan(const char *path, GError **error) {
+NMConnection *strongswan_import_sswan(NMVpnEditorPlugin *iface, const char *path, GError **error) {
+    NMConnection *connection;
     JsonParser *parser = json_parser_new();
     json_parser_load_from_file(parser, path, error);
     if (*error) {
         g_object_unref(parser);
         return NULL;
     }
-    NMConnection *connection =  parse_sswan(parser, error);
+    connection =  parse_sswan(parser, error);
     g_object_unref(parser);
     return connection;
 }
 
 static void strongswan_profile_init(StrongSwanProfile *self) {}
-
-static void serializable_iface_init(JsonSerializableIface *iface) {}
 
 GType strongswan_vpn_method_get_type() {
     static const GEnumValue values[] = {

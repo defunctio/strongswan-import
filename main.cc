@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
     GError *error = NULL;
     if (argc <= 1)
         return -1;
-    NMConnection *connection = strongswan_import_sswan(argv[1], &error);
+    NMConnection *connection = strongswan_import_sswan(nullptr, argv[1], &error);
     if(error) {
         g_message("%s", error->message);
         g_error_free(error);

@@ -39,9 +39,9 @@ G_BEGIN_DECLS
 #define STRONGSWAN_PROFILE_IS_SOURCE_CLASS(klass)  (G_TYPE_CHECK_CLASS_TYPE ((klass), STRONGSWAN_PROFILE_TYPE_SOURCE))
 #define STRONGSWAN_PROFILE_SOURCE_GET_CLASS(obj)   (G_TYPE_INSTANCE_GET_CLASS ((obj), STRONGSWAN_PROFILE_TYPE_SOURCE, StrongSwanProfileClass))
 enum {
-    PROP_0,
+    PROP_ZERO,
     PROP_UUID,
-    PROP_NAME,
+    PROP_VPNNAME,
     PROP_METHOD,
     PROP_REMOTEADDR,
     PROP_LOCALP12,
@@ -81,9 +81,8 @@ typedef struct StrongSwanProfileClass_ {
 
 GType strongswan_profile_get_type(void);
 GType strongswan_vpn_method_get_type(void);
-static void serializable_iface_init(JsonSerializableIface *iface);
-static void setting_vpn_add_data_item(NMSettingVpn *setting, const char *key, const char *value);
-NMConnection *strongswan_import_sswan(const char *path, GError **error);
+NMConnection *parse_sswan(JsonParser *parser, GError **error);
+NMConnection *strongswan_import_sswan(NMVpnEditorPlugin *iface, const char *path, GError **error);
 NMConnection *strongswan_fuzz_import(const char *data, size_t size, GError **error);
 
 G_END_DECLS
