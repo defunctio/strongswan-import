@@ -28,6 +28,7 @@
 #include <glib-object.h>
 #include <json-glib/json-glib.h>
 #include <NetworkManager.h>
+#include <credentials/certificates/certificate.h>
 
 G_BEGIN_DECLS
 
@@ -79,11 +80,19 @@ typedef struct StrongSwanProfileClass_ {
     GObjectClass parent_class;
 } StrongSwanProfileClass;
 
+// TODO: this really should provider an interface for destroying buffers
+typedef struct profile_t {
+    certificate_t *ca;
+    certificate_t *user_cert;
+    private_key_t *private_key;
+} profile_t;
+
 GType strongswan_profile_get_type(void);
 GType strongswan_vpn_method_get_type(void);
 NMConnection *parse_sswan(JsonParser *parser, GError **error);
 NMConnection *strongswan_import_sswan(NMVpnEditorPlugin *iface, const char *path, GError **error);
 NMConnection *strongswan_fuzz_import(const char *data, size_t size, GError **error);
+static profile_t* load_p12(chunk_t data);
 
 G_END_DECLS
 
