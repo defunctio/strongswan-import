@@ -1,9 +1,7 @@
 #include <iostream>
 #include <glib.h>
 #include <NetworkManager.h>
-#include "strongswan_profile.h"
-
-//extern "C" NMConnection* strongswan_import_sswan(const char *path);
+#include "strongswan_profile.hh"
 
 
 static void added_cb (GObject *client, GAsyncResult *result, gpointer user_data) {
@@ -31,6 +29,7 @@ int main(int argc, char **argv) {
     GError *error = NULL;
     if (argc <= 1)
         return -1;
+
     NMConnection *connection = strongswan_import_sswan(nullptr, argv[1], &error);
     if(error) {
         g_message("%s", error->message);

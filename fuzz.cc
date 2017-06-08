@@ -1,6 +1,6 @@
 #include <cstdint>
 #include <cstdlib>
-#include "strongswan_profile.h"
+#include "strongswan_profile.hh"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
     GError *error = NULL;

@@ -22,6 +22,10 @@
  *   SOFTWARE.
  */
 
+#include <openssl/pem.h>
+#include <openssl/err.h>
+#include <openssl/pkcs12.h>
+#include <openssl/bio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "strongswan_profile.h"
@@ -29,7 +33,7 @@
 static void serializable_iface_init(JsonSerializableIface *iface) {}
 
 G_DEFINE_TYPE_WITH_CODE(StrongSwanProfile, strongswan_profile, G_TYPE_OBJECT,
-                        G_IMPLEMENT_INTERFACE(JSON_TYPE_SERIALIZABLE, serializable_iface_init));
+                        G_IMPLEMENT_INTERFACE(JSON_TYPE_SERIALIZABLE, serializable_iface_init))
 
 static GParamSpec *properties[N_PROPERTIES] = {NULL};
 
@@ -135,15 +139,15 @@ static void strongswan_profile_dispose(GObject *gObject) {
 
 static void strongswan_profile_finalize(GObject *gObject) {
     StrongSwanProfile *priv = strongswan_profile_get_instance_private(STRONGSWAN_PROFILE_SOURCE(gObject));
-    if(priv->user_key) g_free(priv->user_key);
-    if(priv->user_cert) g_free(priv->user_cert);
-    if(priv->certificate) g_free(priv->certificate);
-    if(priv->remote_addr) g_free(priv->remote_addr);
-    if(priv->name) g_free(priv->name);
-    if(priv->esp) g_free(priv->esp);
-    if(priv->ike) g_free(priv->ike);
-    if(priv->p12) g_free(priv->p12);
-    if(priv->uuid) g_free(priv->uuid);
+    if (priv->user_key) g_free(priv->user_key);
+    if (priv->user_cert) g_free(priv->user_cert);
+    if (priv->certificate) g_free(priv->certificate);
+    if (priv->remote_addr) g_free(priv->remote_addr);
+    if (priv->name) g_free(priv->name);
+    if (priv->esp) g_free(priv->esp);
+    if (priv->ike) g_free(priv->ike);
+    if (priv->p12) g_free(priv->p12);
+    if (priv->uuid) g_free(priv->uuid);
 }
 
 static void strongswan_profile_class_init(StrongSwanProfileClass *klass) {
@@ -158,10 +162,10 @@ static void strongswan_profile_class_init(StrongSwanProfileClass *klass) {
                                                 NULL,
                                                 G_PARAM_READWRITE);
     properties[PROP_VPNNAME] = g_param_spec_string("name",
-                                                "Profile name",
-                                                "The name of the VPN Profile.",
-                                                NULL,
-                                                G_PARAM_READWRITE);
+                                                   "Profile name",
+                                                   "The name of the VPN Profile.",
+                                                   NULL,
+                                                   G_PARAM_READWRITE);
     properties[PROP_METHOD] = g_param_spec_enum("method",
                                                 "VPN connection method",
                                                 "The method of VPN connection; one of (key, agent, smartcard, eap)",
@@ -214,15 +218,18 @@ NMConnection *parse_sswan(JsonParser *parser, GError **error) {
     NMSettingIPConfig *s_ip4;
     NMSettingVpn *s_vpn;
     StrongSwanProfile *profile;
+    gsize length = 0;
+    profile_t *prof;
+    char *p12_data;
     JsonNode *root = json_parser_get_root(parser);
 
-    if(root==NULL) { return NULL; }
+    if (root == NULL) { return NULL; }
 
     //TODO: check for memory leaks throughout all of this
     connection = nm_simple_connection_new();
 
-    profile  = (StrongSwanProfile *) json_gobject_deserialize(STRONGSWAN_PROFILE_TYPE_SOURCE, root);
-    if(profile == NULL) { return NULL; }
+    profile = (StrongSwanProfile *) json_gobject_deserialize(STRONGSWAN_PROFILE_TYPE_SOURCE, root);
+    if (profile == NULL) { return NULL; }
 
     s_con = NM_SETTING_CONNECTION(nm_setting_connection_new());
 
@@ -277,14 +284,23 @@ NMConnection *parse_sswan(JsonParser *parser, GError **error) {
     switch (profile->method) {
         case METHOD_KEY:
             setting_vpn_add_data_item(s_vpn, "method", "key");
-            if (profile->p12)
-                nm_setting_vpn_add_secret(s_vpn, "p12", profile->p12);
-            if (profile->certificate)
-                setting_vpn_add_data_item(s_vpn, "certificate", profile->certificate);
-            if (profile->user_cert)
-                setting_vpn_add_data_item(s_vpn, "usercert", profile->user_cert);
-            if (profile->user_key)
-                setting_vpn_add_data_item(s_vpn, "userkey", profile->user_key);
+            if (profile->p12) {
+                p12_data = (char *) g_base64_decode(profile->p12, &length);
+                g_assert(p12_data != NULL);
+                prof = load_p12(p12_data, length);
+                g_free(p12_data);
+                nm_setting_vpn_add_secret(s_vpn, "userkey", prof->priv_key);
+                nm_setting_vpn_add_secret(s_vpn, "usercert", prof->user_cert);
+                nm_setting_vpn_add_secret(s_vpn, "certificate", prof->ca);
+                prof->destroy(prof);
+            } else {
+                if (profile->certificate)
+                    setting_vpn_add_data_item(s_vpn, "certificate", profile->certificate);
+                if (profile->user_cert)
+                    setting_vpn_add_data_item(s_vpn, "usercert", profile->user_cert);
+                if (profile->user_key)
+                    setting_vpn_add_data_item(s_vpn, "userkey", profile->user_key);
+            }
             break;
         case METHOD_AGENT:
         case METHOD_SMARTCARD:
@@ -321,6 +337,7 @@ NMConnection *parse_sswan(JsonParser *parser, GError **error) {
     return connection;
 }
 
+
 NMConnection *strongswan_fuzz_import(const char *data, size_t size, GError **error) {
     NMConnection *connection;
     JsonParser *parser = json_parser_new();
@@ -329,9 +346,105 @@ NMConnection *strongswan_fuzz_import(const char *data, size_t size, GError **err
         g_object_unref(parser);
         return NULL;
     }
-    connection =  parse_sswan(parser, error);
+    connection = parse_sswan(parser, error);
     g_object_unref(parser);
     return connection;
+}
+
+void destroy_profile_fn(profile_t *this) {
+    if (this->priv_key) g_free(this->priv_key);
+    if (this->user_cert) g_free(this->user_cert);
+    if (this->ca) g_free(this->ca);
+    free(this);
+}
+
+profile_t *profile_t_new(EVP_PKEY *pkey, X509 *cert, struct stack_st_X509 *ca) {
+    BIO *biobuf;
+    char *buf;
+    profile_t *profile = malloc(sizeof(profile_t));
+    profile->destroy = destroy_profile_fn;
+    profile->priv_key = NULL;
+    profile->user_cert = NULL;
+    profile->ca = NULL;
+
+    if (!pkey) {
+        fprintf(stderr, "No private key was found.\n");
+        if (cert) X509_free(cert);
+        if (ca) sk_X509_pop_free(ca, X509_free);
+        exit(1);
+    }
+    if (!cert) {
+        fprintf(stderr, "No user certificate was found.\n");
+        EVP_PKEY_free(pkey);
+        if (ca) sk_X509_pop_free(ca, X509_free);
+        exit(1);
+    }
+    if (!ca || !sk_X509_num(ca)) {
+        fprintf(stderr, "No CA was found.\n");
+        EVP_PKEY_free(pkey);
+        X509_free(cert);
+        exit(1);
+    }
+
+    biobuf = BIO_new(BIO_s_mem());
+    PEM_write_bio_PrivateKey(biobuf, pkey, NULL, NULL, 0, NULL, NULL);
+    buf = malloc(biobuf->num_write + 1);
+    memset(buf, 0, biobuf->num_write + 1);
+    // TODO: security: I don't like casting... would it ever be possible to overflow this?
+    BIO_read(biobuf, buf, (int) biobuf->num_write);
+    profile->priv_key = g_strdup(buf);
+
+    PEM_write_bio_X509_AUX(biobuf, cert);
+    buf = realloc(buf, biobuf->num_write + 1);
+    memset(buf, 0, biobuf->num_write + 1);
+    BIO_read(biobuf, buf, (int) biobuf->num_write);
+    profile->user_cert = g_strdup(buf);
+
+    // Just take the first CA... ignore the rest.
+    PEM_write_bio_X509_AUX(biobuf, sk_X509_value(ca, 0));
+    buf = realloc(buf, biobuf->num_write + 1);
+    memset(buf, 0, biobuf->num_write + 1);
+    BIO_read(biobuf, buf, (int) biobuf->num_write);
+    profile->ca = g_strdup(buf);
+
+    BIO_free(biobuf);
+    free(buf);
+    EVP_PKEY_free(pkey);
+    X509_free(cert);
+    sk_X509_pop_free(ca, X509_free);
+    return profile;
+}
+
+profile_t *load_p12(char *data, size_t len) {
+    EVP_PKEY *pkey;
+    X509 *cert;
+    STACK_OF(X509) *ca = NULL;
+    PKCS12 *p12;
+    char *pass;
+    BIO *bio;
+
+    OpenSSL_add_all_algorithms();
+    ERR_load_crypto_strings();
+    bio = BIO_new_mem_buf(data, (int) len);
+
+    p12 = d2i_PKCS12_bio(bio, NULL);
+    if (!p12) {
+        ERR_print_errors_fp(stderr);
+        BIO_free(bio);
+        exit(1);
+    }
+    pass = getpass("Passphrase:");
+    if (!PKCS12_parse(p12, pass, &pkey, &cert, &ca)) {
+        ERR_print_errors_fp(stderr);
+        BIO_free(bio);
+        PKCS12_free(p12);
+        free(pass);
+        exit(1);
+    }
+    BIO_free(bio);
+    PKCS12_free(p12);
+    free(pass);
+    return profile_t_new(pkey, cert, ca);
 }
 
 NMConnection *strongswan_import_sswan(NMVpnEditorPlugin *iface, const char *path, GError **error) {
@@ -342,7 +455,7 @@ NMConnection *strongswan_import_sswan(NMVpnEditorPlugin *iface, const char *path
         g_object_unref(parser);
         return NULL;
     }
-    connection =  parse_sswan(parser, error);
+    connection = parse_sswan(parser, error);
     g_object_unref(parser);
     return connection;
 }
