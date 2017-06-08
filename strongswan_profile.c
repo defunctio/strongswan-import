@@ -22,22 +22,18 @@
  *   SOFTWARE.
  */
 
-#include "/home/ubuntu/src/strongswan/config.h"
+#include <openssl/pem.h>
+#include <openssl/err.h>
+#include <openssl/pkcs12.h>
+#include <openssl/bio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <credentials/containers/pkcs12.h>
-#include <credentials/certificates/x509.h>
-#include <credentials/sets/mem_cred.h>
-#include <credentials/sets/callback_cred.h>
-#include <library.h>
 #include "strongswan_profile.h"
 
 static void serializable_iface_init(JsonSerializableIface *iface) {}
 
 G_DEFINE_TYPE_WITH_CODE(StrongSwanProfile, strongswan_profile, G_TYPE_OBJECT,
                         G_IMPLEMENT_INTERFACE(JSON_TYPE_SERIALIZABLE, serializable_iface_init))
-
-char *chunk_to_str(chunk_t *chunk);
 
 static GParamSpec *properties[N_PROPERTIES] = {NULL};
 
@@ -223,9 +219,8 @@ NMConnection *parse_sswan(JsonParser *parser, GError **error) {
     NMSettingVpn *s_vpn;
     StrongSwanProfile *profile;
     gsize length = 0;
-    guchar *p12_data;
-    chunk_t chunk;
-    char *buf;
+    profile_t *prof;
+    char *p12_data;
     JsonNode *root = json_parser_get_root(parser);
 
     if (root == NULL) { return NULL; }
@@ -290,42 +285,22 @@ NMConnection *parse_sswan(JsonParser *parser, GError **error) {
         case METHOD_KEY:
             setting_vpn_add_data_item(s_vpn, "method", "key");
             if (profile->p12) {
-//                nm_setting_vpn_add_secret(s_vpn, "p12", profile->p12);
-                p12_data = g_base64_decode(profile->p12, &length);
+                p12_data = (char *) g_base64_decode(profile->p12, &length);
                 g_assert(p12_data != NULL);
-                chunk = chunk_create(p12_data, length);
-                profile_t *pp = load_p12(chunk);
-                chunk_free(&chunk);
-                g_assert(pp != NULL);
-                if (pp->ca->get_encoding(pp->ca, CERT_PEM, &chunk)) {
-                    buf = chunk_to_str(&chunk);
-                    nm_setting_vpn_add_secret(s_vpn, "certificate", buf);
-                    free(buf);
-                    chunk_free(&chunk);
-                }
-                if (pp->user_cert->get_encoding(pp->user_cert, CERT_PEM, &chunk)) {
-                    buf = chunk_to_str(&chunk);
-                    nm_setting_vpn_add_secret(s_vpn, "usercert", buf);
-                    free(buf);
-                    chunk_free(&chunk);
-                }
-                if (pp->private_key->get_encoding(pp->private_key, PRIVKEY_PEM, &chunk)) {
-                    buf = chunk_to_str(&chunk);
-                    nm_setting_vpn_add_secret(s_vpn, "userkey", buf);
-                    free(buf);
-                    chunk_free(&chunk);
-                }
-                pp->ca->destroy(pp->ca);
-                pp->user_cert->destroy(pp->user_cert);
-                pp->private_key->destroy(pp->private_key);
-                free(pp);
+                prof = load_p12(p12_data, length);
+                g_free(p12_data);
+                nm_setting_vpn_add_secret(s_vpn, "userkey", prof->priv_key);
+                nm_setting_vpn_add_secret(s_vpn, "usercert", prof->user_cert);
+                nm_setting_vpn_add_secret(s_vpn, "certificate", prof->ca);
+                prof->destroy(prof);
+            } else {
+                if (profile->certificate)
+                    setting_vpn_add_data_item(s_vpn, "certificate", profile->certificate);
+                if (profile->user_cert)
+                    setting_vpn_add_data_item(s_vpn, "usercert", profile->user_cert);
+                if (profile->user_key)
+                    setting_vpn_add_data_item(s_vpn, "userkey", profile->user_key);
             }
-            if (profile->certificate)
-                setting_vpn_add_data_item(s_vpn, "certificate", profile->certificate);
-            if (profile->user_cert)
-                setting_vpn_add_data_item(s_vpn, "usercert", profile->user_cert);
-            if (profile->user_key)
-                setting_vpn_add_data_item(s_vpn, "userkey", profile->user_key);
             break;
         case METHOD_AGENT:
         case METHOD_SMARTCARD:
@@ -362,12 +337,6 @@ NMConnection *parse_sswan(JsonParser *parser, GError **error) {
     return connection;
 }
 
-char *chunk_to_str(chunk_t *chunk) {
-    char *buf = malloc((*chunk).len + 1);
-    memset(buf, 0, (*chunk).len + 1);
-    memcpy(buf, (*chunk).ptr, (*chunk).len);
-    return buf;
-}
 
 NMConnection *strongswan_fuzz_import(const char *data, size_t size, GError **error) {
     NMConnection *connection;
@@ -382,124 +351,103 @@ NMConnection *strongswan_fuzz_import(const char *data, size_t size, GError **err
     return connection;
 }
 
-
-/**
- * Callback credential set pki uses
- */
-static callback_cred_t *cb_set;
-
-/**
- * Credential set to cache entered secrets
- */
-static mem_cred_t *cb_creds;
-
-static shared_key_type_t prompted;
-
-static shared_key_t *cb(void *data, shared_key_type_t type,
-                        identification_t *me, identification_t *other,
-                        id_match_t *match_me, id_match_t *match_other) {
-    char buf[64], *label, *secret = NULL;
-    shared_key_t *shared;
-
-    if (prompted == type) {
-        return NULL;
-    }
-    switch (type) {
-        case SHARED_PIN:
-            label = "Smartcard PIN";
-            break;
-        case SHARED_PRIVATE_KEY_PASS:
-            label = "Private key passphrase";
-            break;
-        default:
-            return NULL;
-    }
-    snprintf(buf, sizeof(buf), "%s: ", label);
-#ifdef HAVE_GETPASS
-    secret = getpass(buf);
-#endif
-    if (secret && strlen(secret)) {
-        prompted = type;
-        if (match_me) {
-            *match_me = ID_MATCH_PERFECT;
-        }
-        if (match_other) {
-            *match_other = ID_MATCH_NONE;
-        }
-        shared = shared_key_create(type, chunk_clone(chunk_from_str(secret)));
-        /* cache password in case it is required more than once */
-        cb_creds->add_shared(cb_creds, shared, NULL);
-        return shared->get_ref(shared);
-    }
-    return NULL;
+void destroy_profile_fn(profile_t *this) {
+    if (this->priv_key) g_free(this->priv_key);
+    if (this->user_cert) g_free(this->user_cert);
+    if (this->ca) g_free(this->ca);
+    free(this);
 }
 
-/**
- * Register PIN/Passphrase callback function
- */
-static void add_callback() {
-    cb_set = callback_cred_create_shared(cb, NULL);
-    lib->credmgr->add_set(lib->credmgr, &cb_set->set);
-    cb_creds = mem_cred_create();
-    lib->credmgr->add_set(lib->credmgr, &cb_creds->set);
-}
-
-/**
- * Unregister PIN/Passphrase callback function
- */
-static void remove_callback() {
-    lib->credmgr->remove_set(lib->credmgr, &cb_creds->set);
-    cb_creds->destroy(cb_creds);
-    lib->credmgr->remove_set(lib->credmgr, &cb_set->set);
-    cb_set->destroy(cb_set);
-}
-
-static profile_t *load_p12(chunk_t data) {
-    certificate_t *cert;
-    private_key_t *key;
-    chunk_t encoding;
+profile_t *profile_t_new(EVP_PKEY *pkey, X509 *cert, struct stack_st_X509 *ca) {
+    BIO *biobuf;
+    char *buf;
     profile_t *profile = malloc(sizeof(profile_t));
+    profile->destroy = destroy_profile_fn;
+    profile->priv_key = NULL;
+    profile->user_cert = NULL;
+    profile->ca = NULL;
 
-    if (!library_init(NULL, "strongswan-import")) {
-        library_deinit();
-        exit(SS_RC_LIBSTRONGSWAN_INTEGRITY);
+    if (!pkey) {
+        fprintf(stderr, "No private key was found.\n");
+        if (cert) X509_free(cert);
+        if (ca) sk_X509_pop_free(ca, X509_free);
+        exit(1);
     }
-    if (lib->integrity && lib->integrity->check_file(lib->integrity, "strongswan-import", "strongswan-import")) {
-        exit(SS_RC_DAEMON_INTEGRITY);
+    if (!cert) {
+        fprintf(stderr, "No user certificate was found.\n");
+        EVP_PKEY_free(pkey);
+        if (ca) sk_X509_pop_free(ca, X509_free);
+        exit(1);
     }
-    //from config.h
-    //"aes des rc2 sha2 sha1 md5 random x509 revocation pkcs1 pkcs7 pkcs8 pkcs12 dnskey sshkey pem openssl gmp ecdsa curve25519 hmac"
-    // TODO: this uses additional config files, we could just inline this to avoid that.
-    bool loaded = lib->plugins->load(lib->plugins,
-                                     lib->settings->get_str(lib->settings, "strongswan-import.load", ""));
-    g_assert(loaded == true);
-    add_callback();
+    if (!ca || !sk_X509_num(ca)) {
+        fprintf(stderr, "No CA was found.\n");
+        EVP_PKEY_free(pkey);
+        X509_free(cert);
+        exit(1);
+    }
 
-    pkcs12_t *p12 = lib->creds->create(lib->creds, CRED_CONTAINER, CONTAINER_PKCS12, BUILD_BLOB,
-                                       data, BUILD_END);
-    g_assert(p12 != NULL);
-    enumerator_t *enumerator = p12->create_cert_enumerator(p12);
-    while (enumerator->enumerate(enumerator, &cert)) {
-        x509_t *x509 = (x509_t *) cert;
-        // TODO: this should be X509_CA not X509_SELF_SIGNED but pyOpenSSL does not permit setting x509v3 flags
-        if (x509->get_flags(x509) & X509_SELF_SIGNED)
-            profile->ca = cert->get_ref(cert);
-        else
-            profile->user_cert = cert->get_ref(cert);
-    }
-    enumerator->destroy(enumerator);
-    enumerator = p12->create_key_enumerator(p12);
-    while (enumerator->enumerate(enumerator, &key))
-        profile->private_key = key->get_ref(key);
+    biobuf = BIO_new(BIO_s_mem());
+    PEM_write_bio_PrivateKey(biobuf, pkey, NULL, NULL, 0, NULL, NULL);
+    buf = malloc(biobuf->num_write + 1);
+    memset(buf, 0, biobuf->num_write + 1);
+    // TODO: security: I don't like casting... would it ever be possible to overflow this?
+    BIO_read(biobuf, buf, (int) biobuf->num_write);
+    profile->priv_key = g_strdup(buf);
 
-    enumerator->destroy(enumerator);
-    p12->container.destroy(&p12->container);
-    remove_callback();
+    PEM_write_bio_X509_AUX(biobuf, cert);
+    buf = realloc(buf, biobuf->num_write + 1);
+    memset(buf, 0, biobuf->num_write + 1);
+    BIO_read(biobuf, buf, (int) biobuf->num_write);
+    profile->user_cert = g_strdup(buf);
+
+    // Just take the first CA... ignore the rest.
+    PEM_write_bio_X509_AUX(biobuf, sk_X509_value(ca, 0));
+    buf = realloc(buf, biobuf->num_write + 1);
+    memset(buf, 0, biobuf->num_write + 1);
+    BIO_read(biobuf, buf, (int) biobuf->num_write);
+    profile->ca = g_strdup(buf);
+
+    BIO_free(biobuf);
+    free(buf);
+    EVP_PKEY_free(pkey);
+    X509_free(cert);
+    sk_X509_pop_free(ca, X509_free);
     return profile;
 }
 
+profile_t *load_p12(char *data, size_t len) {
+    EVP_PKEY *pkey;
+    X509 *cert;
+    STACK_OF(X509) *ca = NULL;
+    PKCS12 *p12;
+    char *pass;
+    BIO *bio;
+
+    OpenSSL_add_all_algorithms();
+    ERR_load_crypto_strings();
+    bio = BIO_new_mem_buf(data, (int) len);
+
+    p12 = d2i_PKCS12_bio(bio, NULL);
+    if (!p12) {
+        ERR_print_errors_fp(stderr);
+        BIO_free(bio);
+        exit(1);
+    }
+    pass = getpass("Passphrase:");
+    if (!PKCS12_parse(p12, pass, &pkey, &cert, &ca)) {
+        ERR_print_errors_fp(stderr);
+        BIO_free(bio);
+        PKCS12_free(p12);
+        free(pass);
+        exit(1);
+    }
+    BIO_free(bio);
+    PKCS12_free(p12);
+    free(pass);
+    return profile_t_new(pkey, cert, ca);
+}
+
 NMConnection *strongswan_import_sswan(NMVpnEditorPlugin *iface, const char *path, GError **error) {
-    typedef struct profile_t profile_t;
     NMConnection *connection;
     JsonParser *parser = json_parser_new();
     json_parser_load_from_file(parser, path, error);

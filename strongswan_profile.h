@@ -25,10 +25,13 @@
 #ifndef STRONGSWAN_PROFILE_H
 #define STRONGSWAN_PROFILE_H 1
 
+#include <openssl/pem.h>
+#include <openssl/err.h>
+#include <openssl/pkcs12.h>
+#include <openssl/bio.h>
 #include <glib-object.h>
 #include <json-glib/json-glib.h>
 #include <NetworkManager.h>
-#include <credentials/certificates/certificate.h>
 
 G_BEGIN_DECLS
 
@@ -80,19 +83,22 @@ typedef struct StrongSwanProfileClass_ {
     GObjectClass parent_class;
 } StrongSwanProfileClass;
 
-// TODO: this really should provider an interface for destroying buffers
 typedef struct profile_t {
-    certificate_t *ca;
-    certificate_t *user_cert;
-    private_key_t *private_key;
+    gchar *priv_key;
+    gchar *user_cert;
+    gchar *ca;
+    void (*destroy)(struct profile_t *this);
 } profile_t;
+
 
 GType strongswan_profile_get_type(void);
 GType strongswan_vpn_method_get_type(void);
 NMConnection *parse_sswan(JsonParser *parser, GError **error);
 NMConnection *strongswan_import_sswan(NMVpnEditorPlugin *iface, const char *path, GError **error);
 NMConnection *strongswan_fuzz_import(const char *data, size_t size, GError **error);
-static profile_t* load_p12(chunk_t data);
+profile_t* load_p12(char *data, size_t len);
+void destroy_profile_fn(profile_t *this);
+profile_t* profile_t_new(EVP_PKEY *pkey, X509 *cert, struct stack_st_X509 *ca);
 
 G_END_DECLS
 
